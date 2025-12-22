@@ -3,6 +3,7 @@ import os
 import sys
 import asyncio
 import json
+from pathlib import Path
 from typing import Optional, Any, List, Dict
 from inspect import signature
 from mcp import ClientSession, StdioServerParameters
@@ -14,6 +15,21 @@ try:
     SSE_SUPPORTED = True
 except ImportError:
     SSE_SUPPORTED = False
+
+async def check_sse_server_reachable(url: str) -> bool:
+    """Check if an SSE server URL is reachable."""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Try to connect to the SSE endpoint
+            response = await client.get(url)
+            return response.status_code < 500  # Accept any non-server-error status
+    except ImportError:
+        # httpx not available, skip the check
+        return True
+    except Exception:
+        # Connection failed or timeout
+        return False
 
 class MCP:
     def __init__(
@@ -44,15 +60,46 @@ class MCP:
         elif self.transport == "sse":
             if not SSE_SUPPORTED:
                 raise ImportError("MCP SSE client not available. Please update your MCP SDK.")
-            self.session_context = sse_client(self.server_script)
+            
+            # Check if server is reachable before attempting connection
+            is_reachable = await check_sse_server_reachable(self.server_script)
+            if not is_reachable:
+                raise ConnectionError(
+                    f"SSE server at {self.server_script} is not reachable. "
+                    f"Please ensure the browser MCP server is running on port 8100."
+                )
+            
+            try:
+                self.session_context = sse_client(self.server_script)
+            except Exception as e:
+                raise ConnectionError(
+                    f"Failed to create SSE client for {self.server_script}: {e}. "
+                    f"Make sure the server is running and accessible."
+                ) from e
         else:
             raise ValueError(f"Unsupported transport: {self.transport}")
 
-        read, write = await self.session_context.__aenter__()
-        self.session = ClientSession(read, write)
-        await self.session.__aenter__()
-        await self.session.initialize()
-        return self.session
+        try:
+            read, write = await self.session_context.__aenter__()
+            self.session = ClientSession(read, write)
+            await self.session.__aenter__()
+            await self.session.initialize()
+            return self.session
+        except Exception as e:
+            # Clean up on error
+            if self.session_context:
+                try:
+                    await self.session_context.__aexit__(None, None, None)
+                except Exception:
+                    pass  # Ignore cleanup errors
+            # Re-raise with more context
+            if self.transport == "sse":
+                raise ConnectionError(
+                    f"Failed to initialize SSE connection to {self.server_script}. "
+                    f"Error: {e}. "
+                    f"Make sure the server is running at {self.server_script} and accessible."
+                ) from e
+            raise
 
     async def list_tools(self):
         session = await self.ensure_session()
@@ -80,9 +127,34 @@ class MultiMCP:
         for config in self.server_configs:
             try:
                 transport = config.get("transport", "stdio")
+                
+                # Resolve working directory path
+                cwd = config.get("cwd")
+                if cwd:
+                    # If it's a relative path, resolve it relative to the workspace root
+                    if not os.path.isabs(cwd):
+                        # Get workspace root (where main.py is located)
+                        workspace_root = Path(__file__).parent.parent.resolve()
+                        cwd = str(workspace_root / cwd)
+                    # Ensure the directory exists
+                    if not os.path.isdir(cwd):
+                        raise ValueError(f"Working directory does not exist: {cwd}")
+                else:
+                    # Default to mcp_servers directory if script is in mcp_servers
+                    script = config.get("script", "")
+                    if script.endswith(".py") and not os.path.isabs(script):
+                        workspace_root = Path(__file__).parent.parent.resolve()
+                        mcp_servers_dir = workspace_root / "mcp_servers"
+                        if mcp_servers_dir.exists():
+                            cwd = str(mcp_servers_dir)
+                        else:
+                            cwd = os.getcwd()
+                    else:
+                        cwd = os.getcwd()
+                
                 client = MCP(
                     server_script=config["script"],
-                    working_dir=config.get("cwd", os.getcwd()),
+                    working_dir=cwd,
                     transport=transport
                 )
                 self.client_cache[config["id"]] = client
@@ -100,7 +172,38 @@ class MultiMCP:
                         self.server_tools[server_key] = []
                     self.server_tools[server_key].append(tool)
             except Exception as e:
-                log_step(f"Error initializing MCP server {config['script']}: {e}", symbol="❌")
+                import traceback
+                error_msg = str(e)
+                # Try to extract more details from nested exceptions
+                if hasattr(e, '__cause__') and e.__cause__:
+                    error_msg += f" (caused by: {e.__cause__})"
+                if hasattr(e, '__context__') and e.__context__:
+                    error_msg += f" (context: {e.__context__})"
+                
+                # Check if this is an optional server (SSE servers are optional by default)
+                is_optional = config.get("optional", False)
+                is_sse = config.get("transport", "stdio") == "sse"
+                
+                # SSE servers are optional by default - continue without them
+                if is_sse and isinstance(e, ConnectionError):
+                    log_step(
+                        f"SSE server {config['script']} is not available (optional): {error_msg}. "
+                        f"Continuing without browser tools.",
+                        symbol="⚠️ "
+                    )
+                    continue  # Skip this server and continue with others
+                
+                # Log the full traceback to stderr for debugging (only for non-optional servers)
+                if not is_optional:
+                    import sys
+                    sys.stderr.write(f"\n❌ Full error traceback for {config['script']}:\n")
+                    traceback.print_exc(file=sys.stderr)
+                    sys.stderr.flush()
+                
+                if is_optional:
+                    log_step(f"Optional MCP server {config['script']} failed (skipping): {error_msg}", symbol="⚠️ ")
+                else:
+                    log_step(f"Error initializing MCP server {config['script']}: {error_msg}", symbol="❌")
 
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         entry = self.tool_map.get(tool_name)

@@ -6,17 +6,18 @@ mcp_servers:
   #   description: "Most used Math tools, including special string-int conversions, fibonacci, python sandbox, shell and sql related tools"
   - id: documents
     script: mcp_server_2.py
-    
-    cwd: I:\TSAI\2025\EAG 2\Course Content\Code\Session 14\S15_Manual-1\S15_Manual\mcp_servers
+    cwd: mcp_servers
+    transport: stdio
     description: "Load, search and extract within webpages, local PDFs or other documents. Web and document specialist"
   - id: websearch
     script: mcp_server_3.py
-    cwd: I:\TSAI\2025\EAG 2\Course Content\Code\Session 14\S15_Manual-1\S15_Manual\mcp_servers
+    cwd: mcp_servers
     transport: stdio
     description: "Webtools to search internet for queries and fetch content for a specific web page"
   - id: webbrowsing
     script: http://localhost:8100/sse  # SSE URL
     transport: sse
+    # Note: SSE servers are optional - the app will continue without them if unavailable
     description: "Full Browser Access (persistent)"
   # - id: mixed
   #   script: mcp_server_4.py
