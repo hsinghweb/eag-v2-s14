@@ -20,16 +20,30 @@ async def check_sse_server_reachable(url: str) -> bool:
     """Check if an SSE server URL is reachable."""
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # Try to connect to the SSE endpoint
-            response = await client.get(url)
-            return response.status_code < 500  # Accept any non-server-error status
+        # For SSE endpoints, we use a shorter timeout and accept that
+        # the connection might stay open (which is normal for SSE)
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            try:
+                # Start the request but don't wait for the full response
+                # SSE endpoints keep connections open, so we just check if we can connect
+                async with client.stream("GET", url) as response:
+                    # If we get a response (even if it's streaming), server is reachable
+                    return response.status_code < 500
+            except httpx.TimeoutException:
+                # Timeout is OK for SSE - it means the server accepted the connection
+                # and is keeping it open (which is expected behavior)
+                return True
+            except httpx.ConnectError:
+                # Connection refused means server is not running
+                return False
     except ImportError:
         # httpx not available, skip the check
         return True
-    except Exception:
-        # Connection failed or timeout
-        return False
+    except Exception as e:
+        # For other exceptions, log but don't fail - let the actual connection attempt handle it
+        print(f"[DEBUG] SSE reachability check exception: {e}")
+        # Return True to allow the connection attempt to proceed
+        return True
 
 class MCP:
     def __init__(
@@ -61,14 +75,8 @@ class MCP:
             if not SSE_SUPPORTED:
                 raise ImportError("MCP SSE client not available. Please update your MCP SDK.")
             
-            # Check if server is reachable before attempting connection
-            is_reachable = await check_sse_server_reachable(self.server_script)
-            if not is_reachable:
-                raise ConnectionError(
-                    f"SSE server at {self.server_script} is not reachable. "
-                    f"Please ensure the browser MCP server is running on port 8100."
-                )
-            
+            # Skip reachability check for SSE - SSE endpoints keep connections open
+            # which can cause false negatives. Let the actual connection attempt handle errors.
             try:
                 self.session_context = sse_client(self.server_script)
             except Exception as e:

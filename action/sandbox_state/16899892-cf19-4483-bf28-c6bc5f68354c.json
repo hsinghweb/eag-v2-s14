@@ -1,0 +1,3 @@
+{
+  "page_state_0A": "BrowserType.launch_persistent_context: Executable doesn't exist at C:\\Users\\Himanshu\\AppData\\Local\\ms-playwright\\chromium-1200\\chrome-win64\\chrome.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     playwright install                                     ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+}
