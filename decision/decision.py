@@ -18,7 +18,7 @@ from datetime import datetime
 from agent.model_manager import ModelManager
 
 class Decision:
-    def __init__(self, decision_prompt_path: str, multi_mcp: MultiMCP, browser_decision_prompt_path: str = None, api_key: str | None = None, model: str = "gemini-2.0-flash"):
+    def __init__(self, decision_prompt_path: str, multi_mcp: MultiMCP, browser_decision_prompt_path: str = None, api_key: str | None = None, model: str = "gemini-2.5-flash-lite"):
         self.decision_prompt_path = decision_prompt_path
         self.browser_decision_prompt_path = browser_decision_prompt_path
         self.multi_mcp = multi_mcp

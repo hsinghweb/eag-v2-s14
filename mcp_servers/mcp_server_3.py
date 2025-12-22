@@ -125,7 +125,7 @@ async def webpage_url_to_llm_summary(input: SummaryInput, ctx: Context) -> dict:
 
         client = get_client()
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash-lite",
             contents=full_prompt
         )
 

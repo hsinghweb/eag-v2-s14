@@ -1,5 +1,5 @@
 ############################################################
-#  Decision Module Prompt – Gemini Flash 2.0
+#  Decision Module Prompt – Gemini 2.5 Flash Lite
 #  Role  : Graph-based planner
 #  Output: plan_graph + next_step_id + 3 code variants as CODE_0A, CODE_0B, CODE_0C
 #  Format: STRICT JSON (no markdown, no prose)

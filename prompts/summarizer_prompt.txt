@@ -1,5 +1,5 @@
 ############################################################
-#  Summarizer Module Prompt – Gemini Flash 2.0
+#  Summarizer Module Prompt – Gemini 2.5 Flash Lite
 #  Role  : Final Reasoner and Knowledge-Presenter
 #  Output: FINAL SUMMARY only (no JSON, no wrapper). Target 8000 words!
 #  Tone  : Precise, expressive, user-facing, detailed, guided by perception

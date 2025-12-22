@@ -1,5 +1,5 @@
 ############################################################
-#  Perception Module Prompt – Gemini Flash 2.0
+#  Perception Module Prompt – Gemini 2.5 Flash Lite
 #  Role  : High-Level Interpreter & Controller
 #  Output: ERORLL snapshot + Routing Decision + Summarization Directive
 #  Format: STRICT JSON only – no markdown, no prose

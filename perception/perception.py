@@ -17,7 +17,7 @@ from agent.model_manager import ModelManager
 
 
 class Perception:
-    def __init__(self, perception_prompt_path: str, api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
+    def __init__(self, perception_prompt_path: str, api_key: Optional[str] = None, model: str = "gemini-2.5-flash-lite"):
         self.perception_prompt_path = perception_prompt_path
         self.model = ModelManager()
 

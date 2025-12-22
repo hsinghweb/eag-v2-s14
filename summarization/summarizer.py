@@ -15,7 +15,7 @@ from agent.model_manager import ModelManager
 
 
 class Summarizer:
-    def __init__(self, summarizer_prompt_path: str, api_key: str | None = None, model: str = "gemini-2.0-flash"):
+    def __init__(self, summarizer_prompt_path: str, api_key: str | None = None, model: str = "gemini-2.5-flash-lite"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not found in environment or explicitly provided.")
