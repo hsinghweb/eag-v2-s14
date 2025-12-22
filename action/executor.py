@@ -170,6 +170,19 @@ async def run_user_code(code: str, multi_mcp, session_id: str = "default_session
             tool.name: make_tool_proxy(tool.name, multi_mcp)
             for tool in multi_mcp.get_all_tools()
         }
+        
+        # Log available tools for debugging
+        if not tool_funcs:
+            log_error("⚠️  No tools available! Check MCP server connections.", symbol="⚠️")
+        else:
+            tool_names = list(tool_funcs.keys())
+            browser_tools = ['open_tab', 'search_google', 'input_text_by_index', 'click_element_by_index']
+            available_browser_tools = [t for t in browser_tools if t in tool_names]
+            if available_browser_tools:
+                log_step(f"✅ Browser tools available: {', '.join(available_browser_tools)}", symbol="✅")
+            else:
+                log_error(f"⚠️  Browser tools NOT available. Make sure browser MCP server is running on port 8100.", symbol="⚠️")
+                log_error(f"   Available tools: {', '.join(tool_names[:10])}{'...' if len(tool_names) > 10 else ''}", symbol="   ")
 
         sandbox = build_safe_globals(tool_funcs, multi_mcp, session_id)
         local_vars = {}
@@ -315,8 +328,34 @@ async def run_user_code(code: str, multi_mcp, session_id: str = "default_session
             "execution_time": start_timestamp,
             "total_time": str(round(time.perf_counter() - start_time, 3))
         }
+    except NameError as e:
+        # Special handling for missing browser tools
+        error_msg = str(e)
+        if any(tool in error_msg for tool in ['open_tab', 'search_google', 'input_text_by_index', 'click_element_by_index']):
+            return {
+                "status": "error",
+                "error": f"{type(e).__name__}: {error_msg}\n\n⚠️  Browser tools are not available. Make sure the browser MCP server is running:\n   uv run .\\browserMCP\\browser_mcp_sse.py",
+                "execution_time": start_timestamp,
+                "total_time": str(round(time.perf_counter() - start_time, 3))
+            }
+        return {
+            "status": "error",
+            "error": f"{type(e).__name__}: {error_msg}",
+            "traceback": traceback.format_exc(),
+            "execution_time": start_timestamp,
+            "total_time": str(round(time.perf_counter() - start_time, 3))
+        }
     except Exception as e:
         print("⚠️ Code execution error:\n", traceback.format_exc())
+        error_msg = str(e)
+        # Check for Playwright browser executable errors
+        if "Executable doesn't exist" in error_msg or "chrome.exe" in error_msg:
+            return {
+                "status": "error",
+                "error": f"{type(e).__name__}: {error_msg}\n\n⚠️  Playwright browser executable not found. Run: python -m playwright install chromium",
+                "execution_time": start_timestamp,
+                "total_time": str(round(time.perf_counter() - start_time, 3))
+            }
         return {
             "status": "error",
             "error": f"{type(e).__name__}: {str(e)}",

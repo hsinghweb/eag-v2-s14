@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from mcp_servers.multiMCP import MultiMCP
 from agent.agent_loop3 import AgentLoop  # 🆕 Use loop3
 from pprint import pprint
+import httpx
 
 BANNER = """
 ──────────────────────────────────────────────────────
@@ -23,10 +24,36 @@ async def interactive() -> None:
         profile = yaml.safe_load(f)
         mcp_servers_list = profile.get("mcp_servers", [])
         configs = list(mcp_servers_list)
+    
+    # Check if browser MCP server is running
+    browser_server_config = next((c for c in configs if c.get("id") == "webbrowsing"), None)
+    if browser_server_config:
+        browser_url = browser_server_config.get("script", "")
+        if browser_url.startswith("http"):
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    response = await client.get(browser_url)
+                    if response.status_code < 500:
+                        log_step(f"✅ Browser MCP server is running at {browser_url}", symbol="✅")
+                    else:
+                        log_step(f"⚠️  Browser MCP server returned error {response.status_code}", symbol="⚠️")
+            except Exception as e:
+                log_step(f"⚠️  Browser MCP server not reachable at {browser_url}. Start it with: uv run .\\browserMCP\\browser_mcp_sse.py", symbol="⚠️")
 
     # Initialize MultiMCP dispatcher
     multi_mcp = MultiMCP(server_configs=configs)
     await multi_mcp.initialize()
+    
+    # Log loaded tools for debugging
+    all_tools = multi_mcp.get_all_tools()
+    tool_names = [tool.name for tool in all_tools]
+    log_step(f"Loaded {len(tool_names)} tools: {', '.join(tool_names[:10])}{'...' if len(tool_names) > 10 else ''}", symbol="✅")
+    
+    # Check if browser tools are available
+    browser_tools = ['open_tab', 'search_google', 'input_text_by_index', 'click_element_by_index']
+    missing_browser_tools = [tool for tool in browser_tools if tool not in tool_names]
+    if missing_browser_tools:
+        log_step(f"⚠️  Browser tools not available: {', '.join(missing_browser_tools)}. Make sure browser MCP server is running on port 8100.", symbol="⚠️")
 
     # Create a single persistent AgentLoop instance
     loop = AgentLoop(
