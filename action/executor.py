@@ -403,6 +403,46 @@ async def run_user_code(code: str, multi_mcp, session_id: str = "default_session
             "execution_time": start_timestamp,
             "total_time": str(round(time.perf_counter() - start_time, 3))
         }
+    except AttributeError as e:
+        # Handle AttributeError - often from data extraction on dynamic websites
+        error_msg = str(e)
+        tb = traceback.format_exc()
+        
+        # Try to extract attribute name from error
+        attr_match = re.search(r"'(\w+)'", error_msg)
+        if attr_match:
+            attr_name = attr_match.group(1)
+            suggestion = (
+                f"AttributeError: '{attr_name}' attribute not found.\n\n"
+                f"This often happens when:\n"
+                f"  1. Extracting data from dynamic websites (real estate, e-commerce)\n"
+                f"  2. The page structure changed or content hasn't loaded yet\n"
+                f"  3. Trying to access attributes on None/empty objects\n\n"
+                f"💡 Fix strategies:\n"
+                f"  - Wait for page to load: use `wait(3)` after navigation\n"
+                f"  - Check if object exists before accessing: `if result and hasattr(result, '{attr_name}'):`\n"
+                f"  - Use `get_comprehensive_markdown()` to see actual page content\n"
+                f"  - Try extracting raw text first, then parse patterns\n"
+                f"  - Scroll to reveal content: `scroll_down(500)`\n"
+                f"  - Take screenshot to verify page state: `take_screenshot()`\n\n"
+                f"Original error: {error_msg}"
+            )
+        else:
+            suggestion = (
+                f"AttributeError: An attribute was accessed that doesn't exist.\n\n"
+                f"This often happens with dynamic websites where content loads via JavaScript.\n"
+                f"Try waiting longer, checking if objects exist, or extracting raw text instead.\n\n"
+                f"Original error: {error_msg}"
+            )
+        
+        log_error(f"AttributeError: {error_msg}", symbol="❌")
+        return {
+            "status": "error",
+            "error": suggestion,
+            "traceback": tb,
+            "execution_time": start_timestamp,
+            "total_time": str(round(time.perf_counter() - start_time, 3))
+        }
     except Exception as e:
         print("⚠️ Code execution error:\n", traceback.format_exc())
         error_msg = str(e)

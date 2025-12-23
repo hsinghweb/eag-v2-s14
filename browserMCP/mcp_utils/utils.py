@@ -31,6 +31,10 @@ async def ensure_browser_session():
             viewport_expansion=0,
             include_dynamic_attributes=True,
             keep_alive=True,  # Keep browser alive between commands
+            # Enhanced settings for dynamic websites (real estate, e-commerce)
+            minimum_wait_page_load_time=3.0,  # Increased wait time for JS-heavy sites
+            wait_for_network_idle_page_load_time=2.0,  # Wait for network to stabilize
+            maximum_wait_page_load_time=30.0,  # Max timeout for slow-loading sites
         )
         browser_session = BrowserSession(profile=profile)
         controller = Controller()

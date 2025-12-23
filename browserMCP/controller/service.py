@@ -164,13 +164,20 @@ class Controller(Generic[Context]):
 				# Check if page navigation occurred
 				current_url = page.url
 				if current_url != initial_url:
-					# Page navigation detected - wait for load state
-					await page.wait_for_load_state('networkidle', timeout=5000)
+					# Page navigation detected - wait for load state with longer timeout for dynamic sites
+					try:
+						await page.wait_for_load_state('networkidle', timeout=10000)
+					except Exception:
+						# Fallback to domcontentloaded if networkidle times out
+						await page.wait_for_load_state('domcontentloaded', timeout=8000)
+					# Additional wait for JavaScript-heavy sites (real estate, e-commerce)
+					await asyncio.sleep(2.0)
 					msg += " 🔄 Page navigation detected"
 				else:
 					# Same page - wait for DOM updates and dynamic content
-					await page.wait_for_load_state('domcontentloaded', timeout=3000)
-					await asyncio.sleep(1.0)  # Additional wait for highlights to refresh
+					await page.wait_for_load_state('domcontentloaded', timeout=5000)
+					# Longer wait for dynamic content to render (filters, dropdowns, etc.)
+					await asyncio.sleep(2.0)  # Increased from 1.0 for complex sites
 					
 				# Handle new tab opening
 				if len(browser_session.tabs) > initial_pages:

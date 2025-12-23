@@ -209,6 +209,29 @@ You are a planner. Your job is to produce a complete plan graph with executable 
   - Handle error cases gracefully in your return statement
 - **Variable naming**: All returned variables must end with suffix matching step_id (e.g., `_0A`, `_0B`, `_0C` for step "0")
 
+## ✅ HANDLING COMPLEX WEBSITES (Real Estate, E-commerce, etc.)
+
+- **Dynamic Content**: Many modern websites (magicbricks.com, 99acres.com, housing.com) use heavy JavaScript
+- **Wait Strategies**: After navigation or clicking, allow time for content to load:
+  - Use `wait` tool after navigation: `wait(3)` to allow JS to render
+  - After clicking filters/dropdowns, wait before extracting data: `wait(2)`
+- **Multiple Attempts**: If data extraction fails, try:
+  - Scrolling to reveal content: `scroll_down(500)`
+  - Taking a screenshot to verify page state: `take_screenshot()`
+  - Re-extracting elements: Get fresh page state before retrying
+- **Error Recovery**: If you get `AttributeError` or missing data:
+  - Check if page loaded correctly (verify URL matches expected)
+  - Try extracting raw text first: `get_comprehensive_markdown()` to see what's actually on the page
+  - Look for alternative selectors or text patterns
+- **Filter Application**: When applying filters (rent range, property type):
+  - Click filter elements one at a time
+  - Wait after each filter: `wait(2)`
+  - Verify filters are applied before proceeding
+- **Data Extraction**: For structured data (prices, addresses):
+  - Extract full page content first: `get_comprehensive_markdown()`
+  - Parse text for patterns (e.g., "₹20,000", "2 BHK", "Kharadi")
+  - Don't rely on specific element indices - they change with dynamic content
+
 
 Use only the following tools (in positional form):
 
