@@ -443,6 +443,61 @@ async def run_user_code(code: str, multi_mcp, session_id: str = "default_session
             "execution_time": start_timestamp,
             "total_time": str(round(time.perf_counter() - start_time, 3))
         }
+    except TypeError as e:
+        # Handle TypeError - often from accessing strings as dicts/lists
+        error_msg = str(e)
+        tb = traceback.format_exc()
+        
+        # Check for common TypeError patterns
+        if "string indices must be integers" in error_msg or "not subscriptable" in error_msg:
+            suggestion = (
+                f"TypeError: Trying to access a string as if it were a dictionary or list.\n\n"
+                f"This often happens when:\n"
+                f"  1. A tool returned a string (possibly an error message) instead of expected dict/list\n"
+                f"  2. JSON parsing failed and returned a string\n"
+                f"  3. Trying to access result['key'] when result is actually a string\n\n"
+                f"💡 Fix strategies:\n"
+                f"  - Always check the type before accessing: `if isinstance(result, dict):`\n"
+                f"  - Check for error messages: `if isinstance(result, str) and result.startswith('[error]'):`\n"
+                f"  - Validate tool results: `if result and isinstance(result, (dict, list)):`\n"
+                f"  - Handle string results: `if isinstance(result, str): result = json.loads(result)`\n"
+                f"  - Use safe access: `result.get('key') if isinstance(result, dict) else None`\n\n"
+                f"Example safe code:\n"
+                f"  result = tool_call()\n"
+                f"  if isinstance(result, str):\n"
+                f"      if result.startswith('[error]'):\n"
+                f"          return {{ 'error_0A': result }}\n"
+                f"      try:\n"
+                f"          result = json.loads(result)\n"
+                f"      except:\n"
+                f"          return {{ 'error_0A': 'Failed to parse result' }}\n"
+                f"  if isinstance(result, dict) and 'key' in result:\n"
+                f"      value = result['key']\n"
+                f"  else:\n"
+                f"      return {{ 'error_0A': 'Unexpected result format' }}\n\n"
+                f"Original error: {error_msg}"
+            )
+        elif "unsupported operand" in error_msg:
+            suggestion = (
+                f"TypeError: Operation not supported for this data type.\n\n"
+                f"Check that you're using the correct operators for the data types you're working with.\n\n"
+                f"Original error: {error_msg}"
+            )
+        else:
+            suggestion = (
+                f"TypeError: {error_msg}\n\n"
+                f"This usually means you're trying to use a value in a way that's not supported by its type.\n"
+                f"Check that variables are the expected type before using them.\n"
+            )
+        
+        log_error(f"TypeError: {error_msg}", symbol="❌")
+        return {
+            "status": "error",
+            "error": suggestion,
+            "traceback": tb,
+            "execution_time": start_timestamp,
+            "total_time": str(round(time.perf_counter() - start_time, 3))
+        }
     except Exception as e:
         print("⚠️ Code execution error:\n", traceback.format_exc())
         error_msg = str(e)

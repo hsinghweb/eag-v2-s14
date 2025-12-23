@@ -127,8 +127,9 @@ You must return:
 - **CRITICAL: Always validate tool results before use!**
 - Tool results may be:
   - Lists (for `web_search_urls`): `["url1", "url2", ...]` or `["[error] message"]`
-  - Strings (for text extraction): `"content"` or `"[error] message"`
+  - Strings (for text extraction): `"content"` or `"[error] message"` or JSON strings
   - Dicts (for structured responses): `{"key": "value"}` or `{"error": "message"}`
+- **ALWAYS check the TYPE before accessing**: Never assume a result is a dict/list
 - **Always check for errors** before using tool results:
   ```python
   urls = web_search_urls('query')
@@ -144,8 +145,28 @@ You must return:
   else:
       return { "result_0A": "No results found" }
   ```
+- **Never access dict/list without type checking**:
+  ```python
+  # WRONG - will cause TypeError if result is a string:
+  value = result['key']  # ❌ TypeError if result is string
+  
+  # CORRECT - check type first:
+  if isinstance(result, dict) and 'key' in result:
+      value = result['key']  # ✅ Safe
+  elif isinstance(result, str):
+      # Handle string result (might be error or JSON)
+      if result.startswith('[error]'):
+          return { "error_0A": result }
+      else:
+          try:
+              result = json.loads(result)  # Try parsing JSON
+              value = result.get('key')
+          except:
+              return { "error_0A": "Failed to parse result" }
+  ```
 - **Never access list elements without checking**: Always verify `isinstance(result, list)` and `len(result) > 0` before `result[0]`
 - **Always check for error messages**: Tools may return `"[error] ..."` strings instead of data
+- **Handle JSON strings**: If a tool returns a JSON string, parse it: `result = json.loads(result)` if `isinstance(result, str)`
 - **Note**: The executor automatically adds `await` to tool calls, so you don't need to write it
 - Tool outputs may be wrapped in structured formats like `[{ "type": "text", "text": ..., "annotations": ... }]`. Handle this format when chaining.
 - When using `"globals_schema"`, access variables directly: `if page_state_0A:` not `globals_schema.get("page_state_0A")`
@@ -231,6 +252,29 @@ You are a planner. Your job is to produce a complete plan graph with executable 
   - Extract full page content first: `get_comprehensive_markdown()`
   - Parse text for patterns (e.g., "₹20,000", "2 BHK", "Kharadi")
   - Don't rely on specific element indices - they change with dynamic content
+  - **CRITICAL: Always validate result types before accessing**:
+    ```python
+    # Extract content
+    content = get_comprehensive_markdown()
+    
+    # Check if it's a string (most common case)
+    if isinstance(content, str):
+        # Parse text for patterns
+        import re
+        prices = re.findall(r'₹[\d,]+', content)
+        return { "prices_0A": prices }
+    elif isinstance(content, dict):
+        # If it's already a dict, access safely
+        if 'prices' in content:
+            return { "prices_0A": content['prices'] }
+    else:
+        return { "error_0A": f"Unexpected content type: {type(content)}" }
+    ```
+- **TypeError Prevention**: 
+  - Never do `result['key']` without checking `isinstance(result, dict)` first
+  - Never do `result[0]` without checking `isinstance(result, list)` first
+  - Always handle string results (they might be errors or need JSON parsing)
+  - Common error: `TypeError: string indices must be integers` means you're accessing a string like a dict
 
 
 Use only the following tools (in positional form):
