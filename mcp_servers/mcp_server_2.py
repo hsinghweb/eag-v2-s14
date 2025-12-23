@@ -82,9 +82,9 @@ No – if they are about different topics and should be separated
 
 Just respond in one word (Yes or No), and do not provide any further explanation.
 """
-    print(f"\nComparing chunk {index} and {index+1}")
-    print(f"  Chunk {index} → {chunk1[:60]}{'...' if len(chunk1) > 60 else ''}")
-    print(f"  Chunk {index+1} → {chunk2[:60]}{'...' if len(chunk2) > 60 else ''}")
+    mcp_log("DEBUG", f"\nComparing chunk {index} and {index+1}")
+    mcp_log("DEBUG", f"  Chunk {index} → {chunk1[:60]}{'...' if len(chunk1) > 60 else ''}")
+    mcp_log("DEBUG", f"  Chunk {index+1} → {chunk2[:60]}{'...' if len(chunk2) > 60 else ''}")
 
     result = requests.post(OLLAMA_CHAT_URL, json={
         "model": PHI_MODEL,
@@ -93,7 +93,7 @@ Just respond in one word (Yes or No), and do not provide any further explanation
     })
     result.raise_for_status()
     reply = result.json().get("message", {}).get("content", "").strip().lower()
-    print(f"Model reply: {reply}")
+    mcp_log("DEBUG", f"Model reply: {reply}")
     return reply.startswith("yes")
 
 
@@ -235,11 +235,20 @@ def convert_pdf_to_markdown(input: FilePathInput) -> MarkdownOutput:
     global_image_dir.mkdir(parents=True, exist_ok=True)
 
     # Actual markdown with relative image paths
-    markdown = pymupdf4llm.to_markdown(
-        input.file_path,
-        write_images=True,
-        image_path=str(global_image_dir)
-    )
+    # Redirect stdout to stderr during pymupdf4llm call to prevent breaking JSON-RPC
+    import contextlib
+    from io import StringIO
+    
+    # Save original stdout
+    original_stdout = sys.stdout
+    
+    # Redirect stdout to stderr temporarily
+    with contextlib.redirect_stdout(sys.stderr):
+        markdown = pymupdf4llm.to_markdown(
+            input.file_path,
+            write_images=True,
+            image_path=str(global_image_dir)
+        )
 
 
     # Re-point image links in the markdown
@@ -386,7 +395,8 @@ def process_documents():
 
             embeddings_for_file = []
             new_metadata = []
-            for i, chunk in enumerate(tqdm(chunks, desc=f"Embedding {file.name}")):
+            # Redirect tqdm output to stderr to avoid breaking JSON-RPC
+            for i, chunk in enumerate(tqdm(chunks, desc=f"Embedding {file.name}", file=sys.stderr)):
                 embedding = get_embedding(chunk)
                 embeddings_for_file.append(embedding)
                 new_metadata.append({
@@ -411,7 +421,7 @@ def process_documents():
 
         except Exception as e:
             mcp_log("ERROR", f"Failed to process {file.name}: {e}")
-    print("READY")
+    mcp_log("INFO", "READY")
 
 
 
@@ -427,7 +437,7 @@ def ensure_faiss_ready():
 
 
 async def main():
-    print("STARTING THE SERVER AT AMAZING LOCATION")
+    mcp_log("INFO", "STARTING THE SERVER AT AMAZING LOCATION")
 
     if len(sys.argv) > 1 and sys.argv[1] == "dev":
         mcp.run()  # Run without transport for dev server
@@ -449,7 +459,7 @@ async def main():
             while True:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
-            print("\nShutting down...")
+            mcp_log("INFO", "\nShutting down...")
 
 if __name__ == "__main__":
     asyncio.run(main())
