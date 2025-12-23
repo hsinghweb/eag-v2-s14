@@ -25,20 +25,30 @@ async def interactive() -> None:
         mcp_servers_list = profile.get("mcp_servers", [])
         configs = list(mcp_servers_list)
     
-    # Check if browser MCP server is running
+    # Check if browser MCP server is running (SSE endpoints need special handling)
     browser_server_config = next((c for c in configs if c.get("id") == "webbrowsing"), None)
     if browser_server_config:
         browser_url = browser_server_config.get("script", "")
         if browser_url.startswith("http"):
             try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
-                    response = await client.get(browser_url)
-                    if response.status_code < 500:
-                        log_step(f"✅ Browser MCP server is running at {browser_url}", symbol="✅")
-                    else:
-                        log_step(f"⚠️  Browser MCP server returned error {response.status_code}", symbol="⚠️")
+                # For SSE endpoints, use stream to check connectivity (they keep connections open)
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    try:
+                        async with client.stream("GET", browser_url) as response:
+                            # If we get a response (even if streaming), server is reachable
+                            if response.status_code < 500:
+                                log_step(f"✅ Browser MCP server is running at {browser_url}", symbol="✅")
+                            else:
+                                log_step(f"⚠️  Browser MCP server returned error {response.status_code}", symbol="⚠️")
+                    except httpx.TimeoutException:
+                        # Timeout is OK for SSE - it means the server accepted the connection
+                        # and is keeping it open (which is expected behavior)
+                        log_step(f"✅ Browser MCP server is running at {browser_url} (SSE connection open)", symbol="✅")
+                    except httpx.ConnectError:
+                        log_step(f"⚠️  Browser MCP server not reachable at {browser_url}. Start it with: uv run .\\browserMCP\\browser_mcp_sse.py", symbol="⚠️")
             except Exception as e:
-                log_step(f"⚠️  Browser MCP server not reachable at {browser_url}. Start it with: uv run .\\browserMCP\\browser_mcp_sse.py", symbol="⚠️")
+                # For other exceptions, just warn but don't fail (SSE servers are optional)
+                log_step(f"⚠️  Could not verify browser MCP server at {browser_url}. If server is running, connection will be attempted anyway. Error: {type(e).__name__}", symbol="⚠️")
 
     # Initialize MultiMCP dispatcher
     multi_mcp = MultiMCP(server_configs=configs)

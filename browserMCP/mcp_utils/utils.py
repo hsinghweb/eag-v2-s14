@@ -38,10 +38,33 @@ async def ensure_browser_session():
 
 async def execute_controller_action(action_name: str, action_params=None, **kwargs) -> ActionResultOutput:
     """Helper to execute controller actions consistently"""
+    global browser_session, controller
+    
     try:
         await ensure_browser_session()
         
-        page = await browser_session.get_current_page()
+        # Check for browser context closure errors and recover
+        try:
+            page = await browser_session.get_current_page()
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'closed' in error_msg or 'target page, context or browser has been closed' in error_msg:
+                # Browser context was closed, try to recover
+                print(f"[WARN] Browser context closed, attempting recovery...")
+                # Reset and restart browser session
+                if browser_session:
+                    try:
+                        await browser_session.stop()
+                    except:
+                        pass
+                browser_session = None
+                controller = None
+                # Reinitialize
+                await ensure_browser_session()
+                page = await browser_session.get_current_page()
+            else:
+                raise
+        
         ActModel = controller.registry.create_action_model(page=page)
         
         # Handle actions without parameters
@@ -71,22 +94,26 @@ async def execute_controller_action(action_name: str, action_params=None, **kwar
         error_msg = None
         
         if action_name in ["open_tab", "go_to_url"]:
-            current_page = await browser_session.get_current_page()
-            current_url = current_page.url
-            
-            # Check for browser error pages
-            if any(error_indicator in current_url.lower() for error_indicator in [
-                "chrome-error://", "about:neterror", "edge://", "about:blank"
-            ]):
-                success = False
-                error_msg = f"Navigation failed - browser error page: {current_url}"
-            
-            # For open_tab, check if we have a valid domain
-            elif action_name == "open_tab" and action_params:
-                requested_url = action_params.url if hasattr(action_params, 'url') else str(action_params.get('url', ''))
-                if requested_url and not validate_normalized_url(requested_url, current_url):
+            try:
+                current_page = await browser_session.get_current_page()
+                current_url = current_page.url
+                
+                # Check for browser error pages
+                if any(error_indicator in current_url.lower() for error_indicator in [
+                    "chrome-error://", "about:neterror", "edge://", "about:blank"
+                ]):
                     success = False
-                    error_msg = f"Open tab failed. Requested: {requested_url}, Final: {current_url}"
+                    error_msg = f"Navigation failed - browser error page: {current_url}"
+                
+                # For open_tab, check if we have a valid domain
+                elif action_name == "open_tab" and action_params:
+                    requested_url = action_params.url if hasattr(action_params, 'url') else str(action_params.get('url', ''))
+                    if requested_url and not validate_normalized_url(requested_url, current_url):
+                        success = False
+                        error_msg = f"Open tab failed. Requested: {requested_url}, Final: {current_url}"
+            except Exception as nav_error:
+                # If we can't validate navigation, log but don't fail
+                error_msg = f"Could not validate navigation: {str(nav_error)}"
         
         # Check if this is a navigation action that needs element refresh
         navigation_actions = [
@@ -97,39 +124,49 @@ async def execute_controller_action(action_name: str, action_params=None, **kwar
         ]
         
         if action_name in navigation_actions and success:
-            # Force refresh and get interactive elements WITH context (this creates overlays)
-            state = await browser_session.get_state_summary(cache_clickable_elements_hashes=False)
-            
-            # Take automatic screenshot AFTER overlays are created
-            screenshot_path = await take_page_update_screenshot()
-            
-            elements_result = await create_structured_elements_output(
-                state.element_tree, 
-                strict_mode=False
-            )
-            elements_json = elements_result.model_dump_json(indent=2, exclude_none=True)
-            
-            # Combine original result with interactive elements and screenshot info
-            if result_content and result_content.strip():
-                combined_content = f"{result_content}\n\nWebpage Elements:\n{elements_json}"
-            else:
-                # For successful clicks without content, provide a success message
-                if action_name == "click_element_by_index":
-                    index = action_params_dict.get('index', 'unknown') if action_params_dict else 'unknown'
-                    combined_content = f"✅ Successfully clicked element at index {index}\n\nWebpage Elements:\n{elements_json}"
+            try:
+                # Force refresh and get interactive elements WITH context (this creates overlays)
+                state = await browser_session.get_state_summary(cache_clickable_elements_hashes=False)
+                
+                # Take automatic screenshot AFTER overlays are created
+                screenshot_path = await take_page_update_screenshot()
+                
+                elements_result = await create_structured_elements_output(
+                    state.element_tree, 
+                    strict_mode=False
+                )
+                elements_json = elements_result.model_dump_json(indent=2, exclude_none=True)
+                
+                # Combine original result with interactive elements and screenshot info
+                if result_content and result_content.strip():
+                    combined_content = f"{result_content}\n\nWebpage Elements:\n{elements_json}"
                 else:
-                    combined_content = f"✅ Action '{action_name}' completed successfully\n\nWebpage Elements:\n{elements_json}"
-            
-            # Add screenshot info if available
-            if screenshot_path:
-                combined_content += f"\n\nSeraphineScreenshot: {screenshot_path}"
-            
-            return ActionResultOutput(
-                success=success,
-                content=combined_content,
-                error=error_msg,
-                is_done=False
-            )
+                    # For successful clicks without content, provide a success message
+                    if action_name == "click_element_by_index":
+                        index = action_params_dict.get('index', 'unknown') if action_params_dict else 'unknown'
+                        combined_content = f"✅ Successfully clicked element at index {index}\n\nWebpage Elements:\n{elements_json}"
+                    else:
+                        combined_content = f"✅ Action '{action_name}' completed successfully\n\nWebpage Elements:\n{elements_json}"
+                
+                # Add screenshot info if available
+                if screenshot_path:
+                    combined_content += f"\n\nSeraphineScreenshot: {screenshot_path}"
+                
+                return ActionResultOutput(
+                    success=success,
+                    content=combined_content,
+                    error=error_msg,
+                    is_done=False
+                )
+            except Exception as refresh_error:
+                # If element refresh fails (e.g., context closed), return basic result
+                error_msg = f"Action completed but element refresh failed: {str(refresh_error)}"
+                return ActionResultOutput(
+                    success=success,
+                    content=result_content or f"Action '{action_name}' completed",
+                    error=error_msg,
+                    is_done=False
+                )
         
         return ActionResultOutput(
             success=success,
@@ -139,6 +176,12 @@ async def execute_controller_action(action_name: str, action_params=None, **kwar
         )
         
     except Exception as e:
+        error_str = str(e).lower()
+        if 'closed' in error_str or 'target page, context or browser has been closed' in error_str:
+            return ActionResultOutput(
+                success=False, 
+                error=f"Browser context was closed during action '{action_name}'. The browser session may need to be restarted. Error: {str(e)}"
+            )
         return ActionResultOutput(success=False, error=str(e))
 
 def categorize_element(element) -> tuple[str, str, str]:
@@ -744,7 +787,7 @@ async def get_viewport_text_context():
     global browser_session
     page = await browser_session.get_current_page()
     
-    context_data = await page.evaluate("""
+    context_data = await page.evaluate(r"""
         () => {
             const result = [];
             

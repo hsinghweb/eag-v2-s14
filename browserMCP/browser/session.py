@@ -522,14 +522,36 @@ class BrowserSession(BaseModel):
 			for page in self.browser_context.pages:
 				await page.set_viewport_size(viewport)
 
+	def _is_context_valid(self) -> bool:
+		"""Check if browser context is still valid (not closed)"""
+		if not self.browser_context:
+			return False
+		try:
+			# Try to access a property that will raise if context is closed
+			_ = self.browser_context.pages
+			return True
+		except Exception:
+			# Context is closed or invalid
+			return False
+
+	async def _ensure_valid_context(self) -> None:
+		"""Ensure browser context is valid, restart if closed"""
+		if not self._is_context_valid():
+			logger.warning('🔄 Browser context was closed, restarting browser session...')
+			# Reset context references
+			self.browser_context = None
+			self.agent_current_page = None
+			self.human_current_page = None
+			# Restart the browser session
+			await self.start()
+			assert self.browser_context, 'BrowserContext is not set up after restart'
+
 	# --- Tab management ---
 	async def get_current_page(self) -> Page:
 		"""Get the current page + ensure it's not None / closed"""
 
-		# get-or-create the browser_context if it's not already set up
-		if not self.browser_context:
-			await self.start()
-			assert self.browser_context, 'BrowserContext is not set up'
+		# Ensure browser context is valid (restart if closed)
+		await self._ensure_valid_context()
 
 		# if either focused page is closed, clear it so we dont use a dead object
 		if (not self.human_current_page) or self.human_current_page.is_closed():
@@ -543,7 +565,7 @@ class BrowserSession(BaseModel):
 
 		if self.agent_current_page is None:
 			# if both are still None, fallback to using the first open tab we can find
-			if self.browser_context.pages:
+			if self.browser_context and self.browser_context.pages:
 				first_available_tab = self.browser_context.pages[0]
 				self.agent_current_page = first_available_tab
 				self.human_current_page = first_available_tab
@@ -1789,7 +1811,22 @@ class BrowserSession(BaseModel):
 		if url and not self._is_url_allowed(url):
 			raise BrowserError(f'Cannot create new tab with non-allowed URL: {url}')
 
-		new_page = await self.browser_context.new_page()
+		# Ensure browser context is valid before creating new page
+		await self._ensure_valid_context()
+
+		try:
+			new_page = await self.browser_context.new_page()
+		except Exception as e:
+			error_msg = str(e).lower()
+			if 'closed' in error_msg or 'target page, context or browser has been closed' in error_msg:
+				# Context was closed, try to recover
+				logger.warning(f'🔄 Browser context closed during new_page() call, attempting recovery: {e}')
+				await self._ensure_valid_context()
+				# Retry creating the page after recovery
+				new_page = await self.browser_context.new_page()
+			else:
+				# Re-raise if it's a different error
+				raise
 
 		# Update agent tab reference
 		self.agent_current_page = new_page
