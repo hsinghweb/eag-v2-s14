@@ -1,11 +1,9 @@
-from utils.utils import log_step, log_error
+from utils.utils import log_step
 import os
 import sys
-import asyncio
 import json
 from pathlib import Path
 from typing import Optional, Any, List, Dict
-from inspect import signature
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import ast
@@ -223,55 +221,97 @@ class MultiMCP:
         return await client.call_tool(tool_name, arguments)
 
     async def function_wrapper(self, tool_name: str, *args):
-        if isinstance(tool_name, str) and len(args) == 0:
-            stripped = tool_name.strip()
-            if stripped.endswith(")") and "(" in stripped:
-                try:
-                    expr = ast.parse(stripped, mode='eval').body
-                    if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Name):
-                        raise ValueError("Invalid function call format")
-                    tool_name = expr.func.id
-                    args = [ast.literal_eval(arg) for arg in expr.args]
-                except Exception as e:
-                    raise ValueError(f"Failed to parse function string '{tool_name}': {e}")
-
-        tool_entry = self.tool_map.get(tool_name)
-        if not tool_entry:
-            raise ValueError(f"Tool '{tool_name}' not found.")
-
-        tool = tool_entry["tool"]
-        schema = tool.inputSchema
-        params = {}
-
-        if "input" in schema.get("properties", {}):
-            inner_key = next(iter(schema.get("$defs", {})), None)
-            inner_props = schema["$defs"][inner_key]["properties"]
-            param_names = list(inner_props.keys())
-            if len(param_names) != len(args):
-                raise ValueError(f"{tool_name} expects {len(param_names)} args, got {len(args)}")
-            params["input"] = dict(zip(param_names, args))
-        else:
-            param_names = list(schema["properties"].keys())
-            if len(param_names) != len(args):
-                raise ValueError(f"{tool_name} expects {len(param_names)} args, got {len(args)}")
-            params = dict(zip(param_names, args))
-
-        result = await self.call_tool(tool_name, params)
-
         try:
-            content_text = getattr(result, "content", [])[0].text.strip()
-            parsed = json.loads(content_text)
+            if isinstance(tool_name, str) and len(args) == 0:
+                stripped = tool_name.strip()
+                if stripped.endswith(")") and "(" in stripped:
+                    try:
+                        expr = ast.parse(stripped, mode='eval').body
+                        if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Name):
+                            raise ValueError("Invalid function call format")
+                        tool_name = expr.func.id
+                        args = [ast.literal_eval(arg) for arg in expr.args]
+                    except Exception as e:
+                        raise ValueError(f"Failed to parse function string '{tool_name}': {e}")
 
-            if isinstance(parsed, dict):
-                if "result" in parsed:
-                    return parsed["result"]
-                if len(parsed) == 1:
-                    return next(iter(parsed.values()))
+            tool_entry = self.tool_map.get(tool_name)
+            if not tool_entry:
+                available_tools = list(self.tool_map.keys())[:10]
+                raise ValueError(
+                    f"Tool '{tool_name}' not found. "
+                    f"Available tools: {', '.join(available_tools)}{'...' if len(self.tool_map) > 10 else ''}"
+                )
+
+            tool = tool_entry["tool"]
+            schema = tool.inputSchema
+            params = {}
+
+            if "input" in schema.get("properties", {}):
+                inner_key = next(iter(schema.get("$defs", {})), None)
+                if not inner_key:
+                    raise ValueError(f"Tool '{tool_name}' has invalid schema: missing $defs")
+                inner_props = schema["$defs"][inner_key]["properties"]
+                param_names = list(inner_props.keys())
+                if len(param_names) != len(args):
+                    # Build usage string separately to avoid f-string nesting issues
+                    usage_parts = []
+                    for name in param_names:
+                        param_type = inner_props[name].get("type", "any")
+                        usage_parts.append(f"{name}: {param_type}")
+                    usage_str = ", ".join(usage_parts)
+                    raise ValueError(
+                        f"Tool '{tool_name}' expects {len(param_names)} argument(s) ({', '.join(param_names)}), "
+                        f"but got {len(args)}. "
+                        f"Usage: {tool_name}({usage_str})"
+                    )
+                params["input"] = dict(zip(param_names, args))
+            else:
+                param_names = list(schema["properties"].keys())
+                if len(param_names) != len(args):
+                    # Build usage string separately to avoid f-string nesting issues
+                    usage_parts = []
+                    for name in param_names:
+                        param_type = schema["properties"][name].get("type", "any")
+                        usage_parts.append(f"{name}: {param_type}")
+                    usage_str = ", ".join(usage_parts)
+                    raise ValueError(
+                        f"Tool '{tool_name}' expects {len(param_names)} argument(s) ({', '.join(param_names)}), "
+                        f"but got {len(args)}. "
+                        f"Usage: {tool_name}({usage_str})"
+                    )
+                params = dict(zip(param_names, args))
+
+            result = await self.call_tool(tool_name, params)
+
+            try:
+                content_text = getattr(result, "content", [])[0].text.strip()
+                parsed = json.loads(content_text)
+
+                if isinstance(parsed, dict):
+                    if "result" in parsed:
+                        return parsed["result"]
+                    if len(parsed) == 1:
+                        return next(iter(parsed.values()))
+                    return parsed
+
                 return parsed
-
-            return parsed
-        except Exception:
-            return result
+            except (AttributeError, IndexError, json.JSONDecodeError):
+                # If parsing fails, try to return the raw result
+                if hasattr(result, "content") and result.content:
+                    # Try to extract text from content
+                    texts = []
+                    for item in result.content:
+                        if hasattr(item, "text"):
+                            texts.append(item.text)
+                    if texts:
+                        return "\n".join(texts)
+                return result
+        except ValueError:
+            # Re-raise ValueError with better context
+            raise
+        except Exception as e:
+            # Wrap other exceptions with more context
+            raise RuntimeError(f"Error calling tool '{tool_name}': {str(e)}") from e
 
     def tool_description_wrapper(self) -> List[str]:
         examples = []
@@ -292,7 +332,7 @@ class MultiMCP:
             examples.append(f"{tool.name}({signature_str})  # {tool.description}")
         return examples
 
-    async def list_all_tools(self) -> List[str]:
+    def list_all_tools(self) -> List[str]:
         return list(self.tool_map.keys())
 
     def get_all_tools(self) -> List[Any]:
@@ -304,11 +344,6 @@ class MultiMCP:
             if server in self.server_tools:
                 tools.extend(self.server_tools[server])
         return tools
-
-    # async def shutdown(self):
-    #     for client in self.client_cache.values():
-    #         await client.shutdown()
-
 
     async def shutdown(self):
         for client in self.client_cache.values():

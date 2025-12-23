@@ -328,6 +328,42 @@ async def run_user_code(code: str, multi_mcp, session_id: str = "default_session
             "execution_time": start_timestamp,
             "total_time": str(round(time.perf_counter() - start_time, 3))
         }
+    except UnboundLocalError as e:
+        # Handle UnboundLocalError - variable accessed before assignment
+        error_msg = str(e)
+        tb = traceback.format_exc()
+        
+        # Try to extract variable name from error
+        var_match = re.search(r"local variable '(\w+)' referenced before assignment", error_msg)
+        if var_match:
+            var_name = var_match.group(1)
+            suggestion = (
+                f"UnboundLocalError: Variable '{var_name}' was accessed before being assigned a value.\n"
+                f"This usually happens when:\n"
+                f"  1. A tool call failed and the result wasn't checked before use\n"
+                f"  2. The variable is used in a conditional that didn't execute\n"
+                f"  3. The tool returned an error instead of expected data\n\n"
+                f"💡 Fix: Always check if tool calls succeeded and handle errors:\n"
+                f"   result = await tool_name(...)\n"
+                f"   if isinstance(result, str) and result.startswith('[error]'):\n"
+                f"       # Handle error case\n"
+                f"   else:\n"
+                f"       # Use result safely\n"
+            )
+        else:
+            suggestion = (
+                f"UnboundLocalError: A variable was accessed before being assigned.\n"
+                f"Check your code to ensure all variables are assigned before use."
+            )
+        
+        log_error(f"UnboundLocalError: {error_msg}", symbol="❌")
+        return {
+            "status": "error",
+            "error": f"{suggestion}\n\nOriginal error: {error_msg}",
+            "traceback": tb,
+            "execution_time": start_timestamp,
+            "total_time": str(round(time.perf_counter() - start_time, 3))
+        }
     except NameError as e:
         # Special handling for missing browser tools
         error_msg = str(e)
@@ -340,14 +376,38 @@ async def run_user_code(code: str, multi_mcp, session_id: str = "default_session
             }
         return {
             "status": "error",
-            "error": f"{type(e).__name__}: {error_msg}",
+            "error": f"{type(e).__name__}: {error_msg}\n\n💡 This usually means a function or variable name is misspelled or not defined.",
             "traceback": traceback.format_exc(),
+            "execution_time": start_timestamp,
+            "total_time": str(round(time.perf_counter() - start_time, 3))
+        }
+    except ValueError as e:
+        # Better handling for ValueError (often from tool argument mismatches)
+        error_msg = str(e)
+        tb = traceback.format_exc()
+        
+        if "expects" in error_msg and "args" in error_msg:
+            suggestion = (
+                f"ValueError: Tool argument mismatch.\n"
+                f"{error_msg}\n\n"
+                f"💡 Fix: Check the tool's expected arguments and provide them in the correct order."
+            )
+        else:
+            suggestion = f"ValueError: {error_msg}"
+        
+        log_error(f"ValueError: {error_msg}", symbol="❌")
+        return {
+            "status": "error",
+            "error": suggestion,
+            "traceback": tb,
             "execution_time": start_timestamp,
             "total_time": str(round(time.perf_counter() - start_time, 3))
         }
     except Exception as e:
         print("⚠️ Code execution error:\n", traceback.format_exc())
         error_msg = str(e)
+        tb = traceback.format_exc()
+        
         # Check for Playwright browser executable errors
         if "Executable doesn't exist" in error_msg or "chrome.exe" in error_msg:
             return {
@@ -356,10 +416,23 @@ async def run_user_code(code: str, multi_mcp, session_id: str = "default_session
                 "execution_time": start_timestamp,
                 "total_time": str(round(time.perf_counter() - start_time, 3))
             }
+        
+        # Check for tool-related errors
+        if "Tool" in error_msg or "tool" in error_msg.lower():
+            suggestion = (
+                f"{type(e).__name__}: {error_msg}\n\n"
+                f"💡 This might be a tool execution error. Check:\n"
+                f"  1. Tool name is correct\n"
+                f"  2. Arguments match the tool's expected format\n"
+                f"  3. Tool returned valid data (not an error message)"
+            )
+        else:
+            suggestion = f"{type(e).__name__}: {error_msg}"
+        
         return {
             "status": "error",
-            "error": f"{type(e).__name__}: {str(e)}",
-            "traceback": traceback.format_exc(),
+            "error": suggestion,
+            "traceback": tb,
             "execution_time": start_timestamp,
             "total_time": str(round(time.perf_counter() - start_time, 3))
         }

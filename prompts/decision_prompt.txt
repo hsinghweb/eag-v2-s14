@@ -109,9 +109,9 @@ You must return:
   },
   "next_step_id": "0",
   "code_variants": {
-    "CODE_0A": "urls = web_search_urls('Tesla news')\nraw = webpage_url_to_raw_text(urls[0])\nreturn { \"raw\": raw }",
-    "CODE_0B": "urls = web_search_urls('Tesla news site:reuters.com')\nsummary = webpage_url_to_summary({\n    \"url\": urls[0],\n    \"prompt\": \"Summarize this article focusing on Tesla's recent financial performance, strategic decisions, and any notable executive commentary.\"\n})\nreturn { \"summary\": summary }",
-    "CODE_0C": "urls = web_search_urls('Tesla', 1)\nraw = webpage_url_to_raw_text(urls[0])\nsummary = webpage_url_to_summary({\n    \"url\": urls[0],\n    \"prompt\": \"Summarize this page with an emphasis on Tesla's current market position, new product announcements, and investor sentiment if mentioned.\"\n})\nreturn { \"raw\": raw, \"summary\": summary }"
+    "CODE_0A": "urls = web_search_urls('Tesla news')\nif urls and isinstance(urls, list) and len(urls) > 0 and not str(urls[0]).startswith('[error]'):\n    raw = webpage_url_to_raw_text(urls[0])\n    return { \"raw_0A\": raw }\nelse:\n    return { \"raw_0A\": \"Search failed or returned no results\" }",
+    "CODE_0B": "urls = web_search_urls('Tesla news site:reuters.com', 5)\nif urls and isinstance(urls, list) and len(urls) > 0:\n    first_url = urls[0]\n    if not str(first_url).startswith('[error]'):\n        summary = webpage_url_to_llm_summary(first_url, \"Summarize this article focusing on Tesla's recent financial performance, strategic decisions, and any notable executive commentary.\")\n        return { \"summary_0B\": summary }\n    else:\n        return { \"summary_0B\": first_url }\nelse:\n    return { \"summary_0B\": \"No URLs found\" }",
+    "CODE_0C": "urls = web_search_urls('Tesla', 1)\nif urls and isinstance(urls, list) and len(urls) > 0:\n    url = urls[0]\n    if not str(url).startswith('[error]'):\n        raw = webpage_url_to_raw_text(url)\n        summary = webpage_url_to_llm_summary(url, \"Summarize this page with an emphasis on Tesla's current market position, new product announcements, and investor sentiment if mentioned.\")\n        return { \"raw_0C\": raw, \"summary_0C\": summary }\n    else:\n        return { \"raw_0C\": url, \"summary_0C\": \"URL error\" }\nelse:\n    return { \"raw_0C\": \"No results\", \"summary_0C\": \"No results\" }"
   }
 }
 ```
@@ -124,15 +124,29 @@ You must return:
 - Never return three identical or near-identical code variants.
 - Variables from previous steps are available DIRECTLY by name (e.g., `search_results_0A`, `page_state_0B`)
 - `globals_schema` shows what variables exist and their types - it's metadata, not for data access. Access variables directly: `if page_state_0A:` ❌not `globals_schema.get("page_state_0A")`
-- Assume tool results like `web_search_urls(...)` return a **list**, not a string. Avoid unsafe indexing like `urls[0]`. Always check `if urls:` before accessing.
-- You can safely use:
-
-```py
-urls = "search_results_13"
-if urls:
-  url = urls[0]
-  ...
-```
+- **CRITICAL: Always validate tool results before use!**
+- Tool results may be:
+  - Lists (for `web_search_urls`): `["url1", "url2", ...]` or `["[error] message"]`
+  - Strings (for text extraction): `"content"` or `"[error] message"`
+  - Dicts (for structured responses): `{"key": "value"}` or `{"error": "message"}`
+- **Always check for errors** before using tool results:
+  ```python
+  urls = web_search_urls('query')
+  if urls and isinstance(urls, list) and len(urls) > 0:
+      first_url = urls[0]
+      if not str(first_url).startswith('[error]'):
+          # Safe to use first_url
+          result = webpage_url_to_raw_text(first_url)
+          return { "result_0A": result }
+      else:
+          # Handle error case
+          return { "result_0A": first_url }
+  else:
+      return { "result_0A": "No results found" }
+  ```
+- **Never access list elements without checking**: Always verify `isinstance(result, list)` and `len(result) > 0` before `result[0]`
+- **Always check for error messages**: Tools may return `"[error] ..."` strings instead of data
+- **Note**: The executor automatically adds `await` to tool calls, so you don't need to write it
 - Tool outputs may be wrapped in structured formats like `[{ "type": "text", "text": ..., "annotations": ... }]`. Handle this format when chaining.
 - When using `"globals_schema"`, access variables directly: `if page_state_0A:` not `globals_schema.get("page_state_0A")`
 - Avoid unsafe indexing like `globals_schema["key"]["subkey"]` unless guarded by `if "key" in globals_schema`. Study the variables in `global_schema` to understand how to use or call them in code.
@@ -186,9 +200,14 @@ You are a planner. Your job is to produce a complete plan graph with executable 
 ## ✅ TOOL CONSTRAINTS
 
 - Use up to 3 tool calls per code block
-- No `await`, no `def`, no markdown, no keyword arguments
+- No `await` (the executor automatically adds it to tool calls), no `def`, no markdown, no keyword arguments (use positional args only)
 - Always end with a structured `return { ... }`
-- Assume every tool returns a well-formed value, but its **internal type (e.g., list, dict)** must be verified before direct access.
+- **Never assume tool calls succeed** - always validate results:
+  - Check if result is not None/empty
+  - Check if result is the expected type (list, str, dict)
+  - Check if result contains error messages (strings starting with `"[error]"`)
+  - Handle error cases gracefully in your return statement
+- **Variable naming**: All returned variables must end with suffix matching step_id (e.g., `_0A`, `_0B`, `_0C` for step "0")
 
 
 Use only the following tools (in positional form):

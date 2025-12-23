@@ -138,9 +138,23 @@ async def generate_with_retry(prompt: str, max_retries: int = 3) -> str:
 @mcp.tool()
 async def web_search_urls(input: SearchInput, ctx: Context) -> URLListOutput:
     """Search the web using multiple engines (DuckDuckGo, Bing, Ecosia, etc.) and return a list of relevant result URLs"""
-
+    
     try:
-        urls = await smart_search(input.query, input.max_results)
+        # Validate input
+        if not input or not hasattr(input, 'query'):
+            return URLListOutput(result=["[error] Invalid input: expected SearchInput with 'query' field"])
+        
+        query = str(input.query).strip() if hasattr(input, 'query') else str(input).strip()
+        if not query:
+            return URLListOutput(result=["[error] Query cannot be empty"])
+        
+        max_results = getattr(input, 'max_results', 10) if hasattr(input, 'max_results') else 10
+        if not isinstance(max_results, int) or max_results < 1:
+            max_results = 10
+        
+        mcp_log("INFO", f"Searching for: {query[:100]} (max_results={max_results})")
+        urls = await smart_search(query, max_results)
+        
         # Ensure all URLs are properly encoded strings
         encoded_urls = []
         for url in urls:
@@ -148,17 +162,29 @@ async def web_search_urls(input: SearchInput, ctx: Context) -> URLListOutput:
                 # Try to encode/decode to ensure it's valid UTF-8
                 if isinstance(url, str):
                     url.encode('utf-8', errors='replace').decode('utf-8')
-                    encoded_urls.append(url)
+                    # Basic URL validation
+                    if url.startswith(('http://', 'https://')):
+                        encoded_urls.append(url)
+                    else:
+                        mcp_log("WARN", f"Skipping invalid URL format: {url[:50]}")
                 else:
-                    encoded_urls.append(str(url).encode('utf-8', errors='replace').decode('utf-8'))
+                    url_str = str(url).encode('utf-8', errors='replace').decode('utf-8')
+                    if url_str.startswith(('http://', 'https://')):
+                        encoded_urls.append(url_str)
             except Exception as url_err:
                 # If encoding fails, use a safe representation
-                encoded_urls.append(f"[encoding_error: {str(url_err)}]")
+                mcp_log("WARN", f"URL encoding error: {url_err}")
+        
+        if not encoded_urls:
+            return URLListOutput(result=[f"[error] No valid URLs found for query: {query[:100]}"])
+        
+        mcp_log("INFO", f"Found {len(encoded_urls)} URLs")
         return URLListOutput(result=encoded_urls)
     except Exception as e:
         error_msg = str(e).encode('utf-8', errors='replace').decode('utf-8')
+        mcp_log("ERROR", f"web_search_urls failed: {error_msg}")
         traceback.print_exc(file=sys.stderr)
-        return URLListOutput(result=[f"[error] {error_msg}"])
+        return URLListOutput(result=[f"[error] Search failed: {error_msg}"])
 
 
 @mcp.tool()
@@ -189,7 +215,45 @@ async def webpage_url_to_raw_text(url: str) -> dict:
 async def webpage_url_to_llm_summary(input: SummaryInput, ctx: Context) -> dict:
     """Summarize the webpage using a custom prompt if provided, otherwise fallback to default."""
     try:
-        result = await asyncio.wait_for(smart_web_extract(input.url), timeout=25)
+        # Validate and sanitize URL input
+        if not input or not hasattr(input, 'url'):
+            return {
+                "content": [
+                    TextContent(
+                        type="text",
+                        text="[error] Invalid input: expected SummaryInput with 'url' field"
+                    )
+                ]
+            }
+        
+        url = str(input.url).strip() if hasattr(input, 'url') else str(input).strip()
+        if not url:
+            return {
+                "content": [
+                    TextContent(
+                        type="text",
+                        text="[error] URL cannot be empty"
+                    )
+                ]
+            }
+        
+        # Validate URL format
+        if not url.startswith(('http://', 'https://')):
+            # Try to fix common issues
+            if url.startswith('www.'):
+                url = 'https://' + url
+            elif not url.startswith('http'):
+                return {
+                    "content": [
+                        TextContent(
+                            type="text",
+                            text=f"[error] Invalid URL format: {url[:100]}. URL must start with http:// or https://"
+                        )
+                    ]
+                }
+        
+        mcp_log("INFO", f"Extracting content from: {url[:100]}")
+        result = await asyncio.wait_for(smart_web_extract(url), timeout=25)
         text = result.get("best_text", "")[:3000]
 
         if not text.strip():
